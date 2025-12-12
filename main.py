@@ -174,8 +174,7 @@ plt.savefig("figures/kmeans_silhouette.png")
 plt.show()
 
 ##KMeans Clustering
-k = 5 # choose based on previous analysis of SS and elbow method graph. 
-best_k = 3
+best_k = 5 # choose based on previous analysis of SS and elbow method graph. 
 
 kmeans = KMeans(n_clusters=best_k, random_state=42)
 kmeans_labels = kmeans.fit_predict(X_scaled)
