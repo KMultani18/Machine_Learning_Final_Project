@@ -125,7 +125,7 @@ Evaluate:
 - Compare clusters with meaningful real-world groups if possible
 '''''
 #prepare data for clustering
-cluster_data = numeric_df
+cluster_data = df.select_dtypes(include=["int64", "float64"]).drop(columns=["Defect"])
 #scale the data: 
 scaler = StandardScaler()
 X_scaled = scaler.fit_transform(cluster_data)
@@ -174,7 +174,7 @@ plt.savefig("figures/kmeans_silhouette.png")
 plt.show()
 
 ##KMeans Clustering
-best_k = 5 # choose based on previous analysis of SS and elbow method graph. 
+best_k = 2 # choose based on previous analysis of SS and elbow method graph. 
 
 kmeans = KMeans(n_clusters=best_k, random_state=42)
 kmeans_labels = kmeans.fit_predict(X_scaled)
@@ -206,7 +206,7 @@ print(df.groupby("KMeans_Cluster")["Defect"].mean())
 
 ##Agglomerative Clustering
 #Goal: discover hierarchical process regimes using the same number of clusters (k = 5) for fair comparison with K-Means.
-agglo = AgglomerativeClustering(n_clusters=5, linkage="ward")
+agglo = AgglomerativeClustering(n_clusters=2, linkage="ward")
 agglo_labels = agglo.fit_predict(X_scaled)
 
 #Silhouette Score
@@ -240,6 +240,12 @@ print(df.groupby("Agglo_Cluster")["Defect"].mean())
 #Logistic Regression
 #Random Forest
 #SVM(RBF Kernel)
+'''''
+classification problem: 
+- accuracy, precision, recall, F1-score, ROC-AUC
+'''''
+#define features
+X = df.select_dtypes(include=["int64", "float64"]).drop(columns=["Defect"])
 
 ##5) Hyperparameter Tuning
 '''''
