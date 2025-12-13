@@ -244,8 +244,68 @@ print(df.groupby("Agglo_Cluster")["Defect"].mean())
 classification problem: 
 - accuracy, precision, recall, F1-score, ROC-AUC
 '''''
-#define features
+#define feature (X) and target (y)
 X = df.select_dtypes(include=["int64", "float64"]).drop(columns=["Defect"])
+y = df["Defect"]
+
+#train-test split 80/20
+from sklearn.model_selection import train_test_split
+
+X_train, X_test, y_train, y_test = train_test_split(
+    X,y, test_size=0.2, random_state=42, stratify=y
+)
+
+#feature scaling for LR and SVM: 
+scaler = StandardScaler()
+X_train_scaled = scaler.fit_transform(X_train)
+X_test_scaled = scaler.transform(X_test)
+
+#Logistic Regression
+from sklearn.linear_model import LogisticRegression
+#initialize model
+log_reg = LogisticRegression(random_state=42, max_iter=1000) # max_iter = 1000 ensures convergence
+log_reg.fit(X_train_scaled, y_train)
+
+#predictions
+y_pred_lr = log_reg.predict(X_test_scaled)
+y_proba_lr = log_reg.predict_proba(X_test_scaled)[:, 1]
+
+#Random Forest
+from sklearn.ensemble import RandomForestClassifier
+#initialize model
+rf = RandomForestClassifier(n_estimators = 200, random_state = 42, class_weight="balanced") # n_estimators=200 for more robust results, class_weight="balanced" to handle class imbalance
+rf.fit(X_train, y_train)
+
+#predictions
+y_pred_rf = rf.predict(X_test)
+y_proba_rf = rf.predict_proba(X_test)[:, 1]
+
+#SVM with RBF Kernel
+from sklearn.svm import SVC
+#initialize SVM with RBF kernel
+svm = SVC(kernel="rbf", probability=True, random_state=42)
+svm.fit(X_train_scaled, y_train)
+#predictions
+y_pred_svm = svm.predict(X_test_scaled)
+y_proba_svm = svm.predict_proba(X_test_scaled)[:, 1]
+
+#Evaluation Metrics
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
+
+def evaluate_model(name, y_true, y_pred, y_prob):
+    print(f"\n{name} Performance:")
+    print("Accuracy:", accuracy_score(y_true, y_pred))
+    print("Precision:", precision_score(y_true, y_pred))
+    print("Recall:", recall_score(y_true, y_pred))
+    print("F1 Score:", f1_score(y_true, y_pred))
+    print("ROC-AUC:", roc_auc_score(y_true, y_prob))
+
+#Evaluate all models:
+evaluate_model("Logistic Regression", y_test, y_pred_lr, y_proba_lr)
+evaluate_model("Random Forest", y_test, y_pred_rf, y_proba_rf)
+evaluate_model("SVM (RBF)", y_test, y_pred_svm, y_proba_svm)
+
+
 
 ##5) Hyperparameter Tuning
 '''''
@@ -255,8 +315,132 @@ Discuss:
 - How performance changed vs baseline
 '''''
 
+'''''
+Random Forest-> sensitive to tree depth and number of trees.
+SVm(RBF)-> sensitive to C and gamma.
+Defaults are not optimal.
+'''''
+
+#Grid Search for Random Forest
+from sklearn.model_selection import GridSearchCV
+
+#define parameter grid
+rf_param_grid = {
+    "n_estimators": [100, 200, 300],
+    "max_depth": [None, 10, 20],
+    "min_samples_split": [2, 5],
+    "min_samples_leaf": [1, 2]
+}
+
+#run grid search
+rf_grid = GridSearchCV(
+    estimator=RandomForestClassifier(
+        random_state=42, 
+        class_weight="balanced"
+        ),
+        param_grid=rf_param_grid,
+        scoring="recall", #focus on detecting defects
+        cv=5,
+        n_jobs=-1
+)
+
+rf_grid.fit(X_train, y_train)
+
+#best parameters
+print("\n\nBest Random Forest Parameters:") 
+print(rf_grid.best_params_)
+
+#evaluate tuned RF
+best_rf = rf_grid.best_estimator_
+
+y_pred_rf_tuned = best_rf.predict(X_test)
+y_proba_rf_tuned = best_rf.predict_proba(X_test)[:, 1]
+
+evaluate_model(
+    "Random Forest (Tuned)",
+    y_test,
+    y_pred_rf_tuned,
+    y_proba_rf_tuned
+)
+
+
+#GridSearchCV for SVM (RBF)
+#SVM is expensive to train, so we limit the grid size
+svm_param_grid = {
+    "C": [0.1, 1, 10],
+    "gamma": ["scale", 0.01, 0.1],
+}
+
+#run grid search
+svm_grid = GridSearchCV(
+    estimator=SVC(
+        kernel="rbf",
+        probability=True,
+        class_weight="balanced",
+        random_state=42
+    ),
+    param_grid=svm_param_grid,
+    scoring="recall",
+    cv=5,
+    n_jobs=-1
+)
+
+svm_grid.fit(X_train_scaled, y_train)
+
+#best parameters
+print("\n\nBest SVM Parameters:")
+print(svm_grid.best_params_)
+
+#evaluate tuned SVM
+best_svm = svm_grid.best_estimator_
+
+y_pred_svm_tuned = best_svm.predict(X_test_scaled)
+y_proba_svm_tuned = best_svm.predict_proba(X_test_scaled)[:, 1]
+
+evaluate_model(
+    "SVM (RBF, Tuned)",
+    y_test,
+    y_pred_svm_tuned,
+    y_proba_svm_tuned
+)
+
+
+
 ##6) Feature Importance & Interpretation
 #Random Forest Feature Importance
 '''''
 Explain what features matter and why — interpret in context.
 '''''
+
+# extract feature importances from tuned random forest
+import pandas as pd
+
+feature_importances = best_rf.feature_importances_
+
+importance_df = pd.DataFrame({
+    "Feature": X.columns,
+    "Importance": feature_importances
+}).sort_values(by="Importance", ascending=False)
+
+print(importance_df)
+
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+#visualize feature importances
+plt.figure(figsize=(8, 6))
+sns.barplot(
+    data=importance_df.head(10),
+    x="Importance",
+    y="Feature",
+    hue="Feature",
+    palette="viridis",
+    legend=False
+)
+plt.title("Top 10 Feature Importances (Random Forest)")
+plt.xlabel("Importance Score")
+plt.ylabel("Sensor Feature")
+plt.tight_layout()
+plt.savefig("figures/random_forest_feature_importance.png")
+plt.show()
+
