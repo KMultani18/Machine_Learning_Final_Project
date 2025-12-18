@@ -4,10 +4,16 @@ from kagglehub import KaggleDatasetAdapter
 
 #for data manipulation
 import pandas as pd
+import numpy as np # Added for data math
 
 #for plots
 import matplotlib.pyplot as plt
 import seaborn as sns # for pretty plots 
+import os # Added to manage your 'figures' folder
+
+# Create a folder for your outputs if it doesn't exist
+if not os.path.exists('figures'):
+    os.makedirs('figures')
 
 
 ##1) SETUP
@@ -15,7 +21,8 @@ import seaborn as sns # for pretty plots
 file_path = "semiconductor_quality_control.csv"
 
 # Load the latest version
-df = kagglehub.load_dataset(
+# Using dataset_load to ensure the file path is recognized correctly
+df = kagglehub.dataset_load(
   KaggleDatasetAdapter.PANDAS,
   "programmer3/semiconductor-sensor-data-for-predictive-quality",
   file_path,
@@ -24,6 +31,8 @@ df = kagglehub.load_dataset(
   # documenation for more information:
   # https://github.com/Kaggle/kagglehub/blob/main/README.md#kaggledatasetadapterpandas
 )
+
+print(f"Dataset Loaded: {df.shape[0]} rows, {df.shape[1]} columns")
 
 #print(df.shape)
 #print(df.columns)
@@ -40,23 +49,27 @@ Exploratory Data Analysis (EDA)
 - Correlation or relationship insights
 '''''
 
-#summary statistics
-print(df.shape) #for rows and columns 
+# --- CLEAN DATA HEALTH SUMMARY ---
+# (We updated this part to look better in Jupyter while keeping your logic)
+
+health_stats = {
+    "Metric": ["Total Rows", "Total Columns", "Missing Values", "Duplicate Rows"],
+    "Value": [df.shape[0], df.shape[1], df.isna().sum().sum(), df.duplicated().sum()]
+}
+print("========== DATA HEALTH SUMMARY ==========")
+display(pd.DataFrame(health_stats))
 
 #check for "dead" Sensors where std = 0 OR only 1 unique value
-numeric_df = df.select_dtypes(include=["int64", "float64"]).drop(columns=["Defect"]) # removes the defect column not the rows 
-dead_sensors = numeric_df.columns[numeric_df.nunique() <= 1]
-print("Dead sensors:", dead_sensors.tolist())
+numeric_df = df.select_dtypes(include=["int64", "float64"]).drop(columns=["Defect"], errors='ignore')
+dead_sensors = numeric_df.columns[numeric_df.nunique() <= 1].tolist()
+print("\n========== SENSOR SIGNAL CHECK ==========")
+print("Dead sensors:", dead_sensors)
 
-#descriptive statistics
-print(df.describe())
+#descriptive statistics (The Vertical View for better eyes)
+print("\n========== STATISTICAL SUMMARY (VERTICAL VIEW) ==========")
+display(df.describe().T.round(2))
 
-#Missing and Messy Data
-missing_data = df.isna().sum()
-print(missing_data) # 0 missing values. 
-
-#Check for duplicate rows: 
-print("Duplicate rows:", df.duplicated().sum()) # 0 duplicate rows
+#Check for duplicate rows: (Already shown in the table above)
 
 sns.set(style="whitegrid")#white background for plots also add gridlines
 
@@ -108,7 +121,6 @@ plt.title("Correlation Heatmap of Sensor Features")
 plt.tight_layout()
 plt.savefig("figures/correlation_heatmap.png")
 plt.show()
-
 
 
 ##3) Unsupervised Learning
@@ -235,176 +247,109 @@ print("Defect rate per Agglomerative cluster:")
 print(df.groupby("Agglo_Cluster")["Defect"].mean())
 
 
+## 4) Supervised Learning
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.svm import SVC
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
+import pandas as pd
 
-##4) Supervised Learning
-#Logistic Regression
-#Random Forest
-#SVM(RBF Kernel)
-'''''
-classification problem: 
-- accuracy, precision, recall, F1-score, ROC-AUC
-'''''
-#define feature (X) and target (y)
-X = df.select_dtypes(include=["int64", "float64"]).drop(columns=["Defect"])
+# --- DATA PREPARATION ---
+# Selecting numeric features and defining target
+X = df.select_dtypes(include=["int64", "float64"]).drop(columns=["Defect", "KMeans_Cluster", "Agglo_Cluster"], errors='ignore')
 y = df["Defect"]
 
-#train-test split 80/20
-from sklearn.model_selection import train_test_split
+# Train-test split (80/20)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
 
-X_train, X_test, y_train, y_test = train_test_split(
-    X,y, test_size=0.2, random_state=42, stratify=y
-)
-
-#feature scaling for LR and SVM: 
+# Feature scaling (Required for Logistic Regression and SVM)
 scaler = StandardScaler()
 X_train_scaled = scaler.fit_transform(X_train)
 X_test_scaled = scaler.transform(X_test)
 
-#Logistic Regression
-from sklearn.linear_model import LogisticRegression
-#initialize model
-log_reg = LogisticRegression(random_state=42, max_iter=1000) # max_iter = 1000 ensures convergence
-log_reg.fit(X_train_scaled, y_train)
+# --- MODEL TRAINING ---
 
-#predictions
-y_pred_lr = log_reg.predict(X_test_scaled)
-y_proba_lr = log_reg.predict_proba(X_test_scaled)[:, 1]
+# 1. Logistic Regression
+log_reg = LogisticRegression(random_state=42, max_iter=1000).fit(X_train_scaled, y_train)
 
-#Random Forest
-from sklearn.ensemble import RandomForestClassifier
-#initialize model
-rf = RandomForestClassifier(n_estimators = 200, random_state = 42, class_weight="balanced") # n_estimators=200 for more robust results, class_weight="balanced" to handle class imbalance
-rf.fit(X_train, y_train)
+# 2. Random Forest (Balanced)
+rf = RandomForestClassifier(n_estimators=200, random_state=42, class_weight="balanced").fit(X_train, y_train)
 
-#predictions
-y_pred_rf = rf.predict(X_test)
-y_proba_rf = rf.predict_proba(X_test)[:, 1]
+# 3. SVM with RBF Kernel (Added balanced weight to fix the 0.00 recall issue)
+svm = SVC(kernel="rbf", probability=True, random_state=42, class_weight="balanced").fit(X_train_scaled, y_train)
 
-#SVM with RBF Kernel
-from sklearn.svm import SVC
-#initialize SVM with RBF kernel
-svm = SVC(kernel="rbf", probability=True, random_state=42)
-svm.fit(X_train_scaled, y_train)
-#predictions
-y_pred_svm = svm.predict(X_test_scaled)
-y_proba_svm = svm.predict_proba(X_test_scaled)[:, 1]
+# --- CLEAN EVALUATION VIEW ---
 
-#Evaluation Metrics
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
+def evaluate_and_display(name, y_true, y_pred, y_prob):
+    print(f"{f' {name} PERFORMANCE ':=^40}")
+    stats = {
+        "Metric": ["Accuracy", "Precision", "Recall", "F1 Score", "ROC-AUC"],
+        "Score": [
+            accuracy_score(y_true, y_pred),
+            precision_score(y_true, y_pred, zero_division=0),
+            recall_score(y_true, y_pred),
+            f1_score(y_true, y_pred),
+            roc_auc_score(y_true, y_prob)
+        ]
+    }
+    display(pd.DataFrame(stats).round(4))
+    print("="*40 + "\n")
 
-def evaluate_model(name, y_true, y_pred, y_prob):
-    print(f"\n{name} Performance:")
-    print("Accuracy:", accuracy_score(y_true, y_pred))
-    print("Precision:", precision_score(y_true, y_pred))
-    print("Recall:", recall_score(y_true, y_pred))
-    print("F1 Score:", f1_score(y_true, y_pred))
-    print("ROC-AUC:", roc_auc_score(y_true, y_prob))
-
-#Evaluate all models:
-evaluate_model("Logistic Regression", y_test, y_pred_lr, y_proba_lr)
-evaluate_model("Random Forest", y_test, y_pred_rf, y_proba_rf)
-evaluate_model("SVM (RBF)", y_test, y_pred_svm, y_proba_svm)
+# Run evaluations
+evaluate_and_display("Logistic Regression", y_test, log_reg.predict(X_test_scaled), log_reg.predict_proba(X_test_scaled)[:, 1])
+evaluate_and_display("Random Forest", y_test, rf.predict(X_test), rf.predict_proba(X_test)[:, 1])
+evaluate_and_display("SVM (RBF)", y_test, svm.predict(X_test_scaled), svm.predict_proba(X_test_scaled)[:, 1])
 
 
 
 ##5) Hyperparameter Tuning
-'''''
-Use GridSearchCV or RandomizedSearchCV with cross-validation.
-Discuss:
-- Best parameters found
-- How performance changed vs baseline
-'''''
-
-'''''
-Random Forest-> sensitive to tree depth and number of trees.
-SVm(RBF)-> sensitive to C and gamma.
-Defaults are not optimal.
-'''''
-
-#Grid Search for Random Forest
 from sklearn.model_selection import GridSearchCV
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.svm import SVC
+import pandas as pd
+import matplotlib.pyplot as plt
 
-#define parameter grid
-rf_param_grid = {
-    "n_estimators": [100, 200, 300],
-    "max_depth": [None, 10, 20],
-    "min_samples_split": [2, 5],
-    "min_samples_leaf": [1, 2]
-}
-
-#run grid search
-rf_grid = GridSearchCV(
-    estimator=RandomForestClassifier(
-        random_state=42, 
-        class_weight="balanced"
-        ),
-        param_grid=rf_param_grid,
-        scoring="recall", #focus on detecting defects
-        cv=5,
-        n_jobs=-1
-)
-
+# --- 1. Grid Search for Random Forest ---
+rf_param_grid = {"n_estimators": [100, 200, 300], "max_depth": [None, 10, 20]}
+rf_grid = GridSearchCV(RandomForestClassifier(random_state=42, class_weight="balanced"),
+                       param_grid=rf_param_grid, scoring="recall", cv=5, n_jobs=-1)
 rf_grid.fit(X_train, y_train)
 
-#best parameters
-print("\n\nBest Random Forest Parameters:") 
-print(rf_grid.best_params_)
-
-#evaluate tuned RF
 best_rf = rf_grid.best_estimator_
 
-y_pred_rf_tuned = best_rf.predict(X_test)
-y_proba_rf_tuned = best_rf.predict_proba(X_test)[:, 1]
+# Styled Best Params Table for RF
+rf_params_df = pd.DataFrame(rf_grid.best_params_.items(), columns=['Parameter', 'Optimal Value'])
+rf_params_styled = rf_params_df.style.set_caption("Random Forest: Best Hyperparameters")\
+    .set_table_styles([{'selector': 'caption', 'props': [('font-size', '16pt'), ('font-weight', 'bold')]}])\
+    .bar(subset=['Optimal Value'], color='#d65f5f')  # Highlight values
+display(rf_params_styled)
 
-evaluate_model(
-    "Random Forest (Tuned)",
-    y_test,
-    y_pred_rf_tuned,
-    y_proba_rf_tuned
-)
+# Add CV Recall Score
+print(f"Best Cross-Validation Recall (Macro for Minority Class Focus): {rf_grid.best_score_:.4f}")
 
+evaluate_model("Random Forest (Tuned)", y_test, best_rf.predict(X_test), best_rf.predict_proba(X_test)[:, 1])
 
-#GridSearchCV for SVM (RBF)
-#SVM is expensive to train, so we limit the grid size
-svm_param_grid = {
-    "C": [0.1, 1, 10],
-    "gamma": ["scale", 0.01, 0.1],
-}
+print("\n" + "="*60 + "\n")
 
-#run grid search
-svm_grid = GridSearchCV(
-    estimator=SVC(
-        kernel="rbf",
-        probability=True,
-        class_weight="balanced",
-        random_state=42
-    ),
-    param_grid=svm_param_grid,
-    scoring="recall",
-    cv=5,
-    n_jobs=-1
-)
-
+# --- 2. Grid Search for SVM ---
+svm_param_grid = {"C": [0.1, 1, 10], "gamma": ["scale", 0.01]}
+svm_grid = GridSearchCV(SVC(kernel="rbf", probability=True, class_weight="balanced", random_state=42),
+                        param_grid=svm_param_grid, scoring="recall", cv=5, n_jobs=-1)
 svm_grid.fit(X_train_scaled, y_train)
 
-#best parameters
-print("\n\nBest SVM Parameters:")
-print(svm_grid.best_params_)
-
-#evaluate tuned SVM
 best_svm = svm_grid.best_estimator_
 
-y_pred_svm_tuned = best_svm.predict(X_test_scaled)
-y_proba_svm_tuned = best_svm.predict_proba(X_test_scaled)[:, 1]
+# Styled Best Params Table for SVM
+svm_params_df = pd.DataFrame(svm_grid.best_params_.items(), columns=['Parameter', 'Optimal Value'])
+svm_params_styled = svm_params_df.style.set_caption("SVM: Best Hyperparameters")\
+    .set_table_styles([{'selector': 'caption', 'props': [('font-size', '16pt'), ('font-weight', 'bold')]}])\
+    .bar(subset=['Optimal Value'], color='#5fba7d')
+display(svm_params_styled)
 
-evaluate_model(
-    "SVM (RBF, Tuned)",
-    y_test,
-    y_pred_svm_tuned,
-    y_proba_svm_tuned
-)
+print(f"Best Cross-Validation Recall: {svm_grid.best_score_:.4f}")
 
-
+evaluate_model("SVM (Tuned)", y_test, best_svm.predict(X_test_scaled), best_svm.predict_proba(X_test_scaled)[:, 1])
 
 ##6) Feature Importance & Interpretation
 #Random Forest Feature Importance
@@ -443,4 +388,3 @@ plt.ylabel("Sensor Feature")
 plt.tight_layout()
 plt.savefig("figures/random_forest_feature_importance.png")
 plt.show()
-
