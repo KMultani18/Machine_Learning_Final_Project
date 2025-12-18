@@ -217,7 +217,7 @@ print(df.groupby("KMeans_Cluster")["Defect"].mean())
 
 
 ##Agglomerative Clustering
-#Goal: discover hierarchical process regimes using the same number of clusters (k = 5) for fair comparison with K-Means.
+#Goal: discover hierarchical process regimes using the same number of clusters (k = 2) for fair comparison with K-Means.
 agglo = AgglomerativeClustering(n_clusters=2, linkage="ward")
 agglo_labels = agglo.fit_predict(X_scaled)
 
